@@ -19,11 +19,14 @@ const { auth, requiresAuth } = require('express-openid-connect');
 const createHttpError = require('http-errors');
 app.use(
   auth({
+    authorizationParams: {
+      response_type: 'code' // Required, otherwise SDK skips client_secret even on res.oidc.login
+    },
     authRequired: false,
     session: {
       cookie: {
         // Embedding in EHR iframe requires SameSite=None, counts as third party cookie
-        // TODO: Implement iframe protection using HTTP response headers
+        // TODO: Implement iframe protection on app using HTTP response headers
         sameSite: "None"
       }
     },
@@ -35,6 +38,7 @@ app.use(
       // New UUID to represent this login
       const tabId = v4();
       return {
+        // TODO: Centralize logic for grabbing tabID + defining route
         returnTo: `/tab/${tabId}`,
         tabId
       }
@@ -48,10 +52,10 @@ app.use(
         const id_token = jwtDecode(session.id_token);
         // TODO: add other keys like "encounter". Consider error handling like above
         const tabData = { patient: session.patient };
-        const isNewUser =
+        const isSameUser =
           req.oidc.isAuthenticated()
           && req.oidc.user.sub == id_token.sub;
-        const tabs = isNewUser
+        const tabs = isSameUser
           // Same user logged in, combine tabs
           ? {
             [state.tabId]: tabData,
@@ -135,7 +139,7 @@ app.get('/', (req, res, next) => {
 });
 
 if (!isProd) {
-  app.get('/debug', requiresAuth(), (req, res, next) => {
+  app.get('/debug', requiresAuth(), (req, res) => {
     res.json({
       user: req.oidc.user,
       appSession: req.appSession
