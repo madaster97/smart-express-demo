@@ -3,9 +3,12 @@ const { v4 } = require('uuid');
 const got = require('got').default;
 const { JWT: { decode: jwtDecode } } = require('jose');
 const app = express()
-const port = 3000
-const debug = require('debug')('fhirUser');
+const { auth, requiresAuth } = require('express-openid-connect');
+const createHttpError = require('http-errors');
 
+// ENV setup
+const debug = require('debug')('fhirUser');
+const port = 3000
 const isProd = process.env.NODE_ENV == 'production';
 const fhirIss = process.env.FHIR_ISS;
 if (!fhirIss) {
@@ -13,10 +16,17 @@ if (!fhirIss) {
 }
 const launchUrl = process.env.BASE_URL + "/launch";
 const clientId = process.env.CLIENT_ID
+
 app.set('view engine', 'pug');
 
-const { auth, requiresAuth } = require('express-openid-connect');
-const createHttpError = require('http-errors');
+/*
+"auth" SDK handles:
+1. Session management using HTTP cookies
+2. Client authentication
+3. Creating a `redirect_uri` at /callback wherever it is mounted
+4. Redirecting to a /tab/:tabId endpoint. Special handling I wrote to inject patient/encounter context into cookie
+  See getLoginState and afterCallback below
+*/
 app.use(
   auth({
     authorizationParams: {
@@ -38,7 +48,7 @@ app.use(
       // New UUID to represent this login
       const tabId = v4();
       return {
-        // TODO: Centralize logic for grabbing tabID + defining route
+        // TODO: Centralize logic for grabbing tabId + defining route
         returnTo: `/tab/${tabId}`,
         tabId
       }
@@ -49,12 +59,29 @@ app.use(
       if (!session.patient) {
         return Promise.reject('Patient missing from context. Does your auth server support launch/patient scope?');
       } else {
-        const id_token = jwtDecode(session.id_token);
-        // TODO: add other keys like "encounter". Consider error handling like above
-        const tabData = { patient: session.patient };
+        const { access_token, id_token, token_type, expires_at, refresh_token, ...tabData } = session;
+        const idTokenClaims = jwtDecode(session.id_token);
         const isSameUser =
           req.oidc.isAuthenticated()
-          && req.oidc.user.sub == id_token.sub;
+          && req.oidc.user.sub == idTokenClaims.sub;
+        /* Example tabs object. Keys are tabIds
+        {
+          "5636ab83-167b-405e-af9f-1fbdbaf1aefc": {
+            "scope": "<omitted>",
+            "encounter": "eNe8sUNfKPazxTIA2rGmlbg3",
+            "need_patient_banner": "false",
+            "patient": "eTjDDWfopD0BnRlyEO2mGZQ3",
+            ...
+          },
+          "1daba7a1-0960-4e62-9014-1626a20f33dc": {
+            "scope": "<omitted>",
+            "encounter": "eajyq3tHTNbfPFZexvvMthA3",
+            "need_patient_banner": "false",
+            "patient": "eXFljJT8WxVd2PjwvPAGR1A3",
+            ...
+          }
+        }
+        */
         const tabs = isSameUser
           // Same user logged in, combine tabs
           ? {
@@ -67,7 +94,11 @@ app.use(
             [state.tabId]: tabData
           };
         return Promise.resolve({
-          ...session,
+          access_token,
+          id_token,
+          token_type,
+          expires_at,
+          refresh_token,
           tabs
         });
       }
@@ -75,7 +106,8 @@ app.use(
   })
 );
 
-// Auth server initiating an authorize request. Per SMART App Launch
+// Auth server initiating an authorize request
+// Per SMART App Launch: https://hl7.org/fhir/smart-app-launch/1.0.0/#ehr-launch-sequence
 app.get('/launch', (req, res, next) => {
   const req_iss = req.query.iss;
   if (!req_iss) {
@@ -110,7 +142,7 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res) => {
       }
     }).json();
     // TODO, error handling around name parsing
-    const nameObject = patient.name[0]; 
+    const nameObject = patient.name[0];
     const name = nameObject.family + ", " + nameObject.given[0];
     res.render('tab', {
       title: "Seeing " + name,
@@ -144,22 +176,6 @@ if (!isProd) {
       user: req.oidc.user,
       appSession: req.appSession
     })
-  });
-  app.get('/debug/:tabId', requiresAuth(), async (req, res, next) => {
-    const requestedTab = req.params.tabId;
-    const tabData = req.appSession.tabs[requestedTab];
-    if (!tabData) {
-      next(createHttpError(403, 'Requested tab forbidden'))
-    } else {
-      // Request patient data!
-      const tokenSet = req.oidc.accessToken;
-      const patient = await got(fhirIss + '/Patient/' + tabData.patient, {
-        headers: {
-          Authorization: tokenSet.token_type + ' ' + tokenSet.access_token
-        }
-      }).json();
-      res.json(patient);
-    }
   });
 }
 
