@@ -20,12 +20,13 @@ const clientId = process.env.CLIENT_ID
 app.set('view engine', 'pug');
 
 /*
-"auth" SDK handles:
+"express-openid-connect" SDK handles:
 1. Session management using HTTP cookies
 2. Client authentication
 3. Creating a `redirect_uri` at /callback wherever it is mounted
-4. Redirecting to a /tab/:tabId endpoint. Special handling I wrote to inject patient/encounter context into cookie
-  See getLoginState and afterCallback below
+4. Redirecting to a /tab/:tabId endpoint. 
+  - Special handling I wrote to inject patient/encounter context into cookie
+  - See getLoginState and afterCallback below
 */
 app.use(
   auth({
@@ -40,8 +41,13 @@ app.use(
         sameSite: "None"
       }
     },
+    transactionCookie: {
+      // Explicitly setting pre-login cookie as well
+      sameSite: "None"
+    },
     routes: {
       // Set to false to turn off standalone launch (/login endpoint)
+      // If you use standalone, set sameSite to "Strict" for session and "Lax" for transaction cookie
       login: false
     },
     getLoginState: () => {
@@ -106,7 +112,7 @@ app.use(
   })
 );
 
-// Auth server initiating an authorize request
+// Resource server initiating an authorize request
 // Per SMART App Launch: https://hl7.org/fhir/smart-app-launch/1.0.0/#ehr-launch-sequence
 app.get('/launch', (req, res, next) => {
   const req_iss = req.query.iss;
@@ -152,7 +158,7 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res) => {
   }
 })
 
-app.get('/', (req, res, next) => {
+app.get('/', (req, res) => {
   if (!req.oidc.isAuthenticated()) {
     res.render('login', {
       title: "Log into fhiruser",
