@@ -6,8 +6,9 @@ const app = express()
 const { auth, requiresAuth } = require('express-openid-connect');
 const createHttpError = require('http-errors');
 
+const debug = require('debug')('fhiruser');
+
 // ENV setup
-const debug = require('debug')('fhirUser');
 const port = 3000
 const isProd = process.env.NODE_ENV == 'production';
 const fhirIss = process.env.FHIR_ISS;
@@ -153,7 +154,8 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res) => {
     res.render('tab', {
       title: "Seeing " + name,
       message: "Seeing Patient " + name,
-      patient: JSON.stringify(patient, null, 2)
+      patient: JSON.stringify(patient, null, 2),
+      tabId: requestedTab
     })
   }
 })
