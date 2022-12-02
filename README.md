@@ -45,6 +45,16 @@ The `OIDC_ISS` is a bit trickier. This should be the base URL that supports the 
 - SMART App Launcher: https://launch.smarthealthit.org/v/r4/fhir (same as FHIR_ISS)
 - Epic on FHIR sandbox: https://fhir.epic.com/interconnect-fhir-oauth/oauth2
 
+## Allowing Framing
+This app allows iframing if you provide it with an expected origin in your .env file:
+```
+...
+FRAMER_ORIGIN="https://launch.smarthealthit.org/"
+```
+
+This origin can include a wildcard (example: https://*.smarthealthit.org), and is used to populate the X-Frame-Options header or frame-ancestors header, depending on the browser's User-Agent (looking for `Trident`, indicating internet explorer). The following table shows the behavior:
+TODO
+
 ## Running with Other Config
 ```
 node -r dotenv/config . dotenv_config_path=config/<config name>.env
