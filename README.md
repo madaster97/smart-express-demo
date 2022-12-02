@@ -1,37 +1,38 @@
 # smart-express-demo
-An example express app supporting SMART on FHIR. Supports multiple browser tabs protected by cookies
+An example express app supporting SMART on FHIR. Supports multiple browser tabs protected by a shared cookie
 
 # Running the App
 Remember `npm install`, of course
 
+In one terminal, run the server:
 ```
 node -r dotenv/config . dotenv_config_path=config/smart-launch.env
 ```
 
-Change `smart-launch` to your `<config name>` if you create a new one
-
-# SMART App Launcher Setup
+In another terminal, run Caddy to to add TLS:
 ```
-https://launch.smarthealthit.org/?auth_error=&fhir_version_2=r4&iss=&launch_ehr=1&launch_url=http%3A%2F%2Flocalhost%3A3000%2Flaunch&patient=67cbf090-4ddb-4799-99ff-a28abe2740b1&prov_skip_auth=1&prov_skip_login=1&provider=e443ac58-8ece-4385-8d55-775c1b8f3a37&pt_skip_auth=1&public_key=&sde=&sim_ehr=1&token_lifetime=15&user_pt=
+caddy reverse-proxy --from localhost -to localhost:3000
 ```
 
-See "Launch App" in the bottom right of that page, after running with default env above
+Open the [SMART App Launcher](https://launch.smarthealthit.org/?auth_error=&fhir_version_2=r4&iss=&launch_ehr=1&launch_url=https%3A%2F%2Flocalhost%2Flaunch&patient=&prov_skip_auth=1&provider=&pt_skip_auth=1&public_key=&sde=&sim_ehr=1&token_lifetime=15&user_pt=&launch=WzAsIjY3Y2JmMDkwLTRkZGItNDc5OS05OWZmLWEyOGFiZTI3NDBiMSw4N2EzMzlkMC04Y2FlLTQxOGUtODljNy04NjUxZTZhYWIzYzYiLCJlNDQzYWM1OC04ZWNlLTQzODUtOGQ1NS03NzVjMWI4ZjNhMzciLCJBVVRPIiwwLDAsMSwiIiwiIiwiIiwiIiwiIiwiIiwiIiwwLDFd) (hyperlink has user, patients and app URL prefilled)
+
+The launcher is set to launch the app in an iframe, and the app is set to allow the launcher to frame it. Launch the app twice, choosing a different patient each time. Click refresh in each tab to verify they preserve the patient context.
 
 # Setup Other Auth Servers
 Copy `config/smart-launch.env`, to create a new `config/<config name>.env` file this instance of your app. This example only supports one auth server/FHIR server at a time.
 
 ## Register with Auth Server
-Register a client with redirect_uri of `http://localhost:3000/callback` and register a client secret. Add your client_id and client_secret to your .env file
+Register a client with redirect_uri of `https://localhost/callback` and register a client secret. Add your client_id and client_secret to your .env file as `CLIENT_ID` and `CLIENT_SECRET`.
 
 ## Change Cookie Secret
-The env file includes 2 secrets:
+The env file includes anoter secret:
 ```
-SECRET=LONG_RANDOM_VALUE_SMART_LAUNCHER
 ...
-CLIENT_SECRET=YOUR_CLIENT_SECRET
+SECRET=LONG_RANDOM_VALUE
+...
 ```
 
-`SECRET` is how the server signs your cookies. Whenever make a new .env file, CHANGE SECRET. This makes sure that switching the app between multiple auth servers doesn't leave old cookies behind. Future plans for this example include creating separate paths for each auth server to segregate different sessions.
+`SECRET` is how this app signs your cookies. Whenever make a new .env file, '''cnange the SECRET'''. This makes sure that switching the app between multiple auth servers doesn't leave old cookies behind. Try `openssl rand -hex 32` to create a new secret for every server.
 
 ## Find OIDC_ISS and FHIR_ISS
 The `OIDC_ISS` and `FHIR_ISS` environment variables determine what authorization server and FHIR server (respectively) your app will interact with. 
@@ -43,7 +44,6 @@ The `FHIR_ISS` should match the `iss` from the [SMART App Launch](https://hl7.or
 The `OIDC_ISS` is a bit trickier. This should be the base URL that supports the `/.well-known/openid-configuration` endpoint, which returns the auth server's OIDC metadata. This can vary by auth server, and isn't discoverable. It will also be the `iss` parameter within id_tokens (note, here iss is very different from the FHIR_ISS). Some example OIDC_ISS are:
 - SMART App Launcher: https://launch.smarthealthit.org/v/r4/fhir (same as FHIR_ISS)
 - Epic on FHIR sandbox: https://fhir.epic.com/interconnect-fhir-oauth/oauth2
-- Others?
 
 ## Running with Other Config
 ```
