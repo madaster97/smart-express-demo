@@ -18,14 +18,15 @@ if (!fhirIss) {
 }
 const launchUrl = process.env.BASE_URL + "/launch";
 const clientId = process.env.CLIENT_ID
-const framers = (process.env.FRAMER_ORIGINS || '').split(',');
-const allowFraming = !framers.length == 0;
+const framer = process.env.FRAMER_ORIGIN;
+const allowFraming = !!framer;
 if (!allowFraming) {
-  debug(`FRAMER_ORIGINS environment variable is empty.
-    App will reject iframing by using Strict/Lax cookies, and by setting CSP and X-Frame-Options to block framing. 
-    Provide a comma delimited list of origins "https://first.ehr1.com/,https://second.ehr1.com/" to allow framing from those sites`)
+  debug(`FRAMER_ORIGIN environment variable is empty.
+    App will reject iframing by using Lax cookies, and by setting CSP or X-Frame-Options to block framing. 
+    Provide an allowed origin "https://first.ehr1.com/" to allow framing from that site`)
 } else {
-  debug('iframing allowed from %o', framers);
+  // TODO: Validate provided framers
+  debug('iframing allowed from %s', framer);
 }
 
 // Header protection setup
@@ -34,49 +35,23 @@ if (!allowFraming) {
   app.use(helmet({}))
 } else {
   const isIEReq = (req) => req.headers['user-agent'].includes('Trident');
-  const getReferer = (req) => req.headers.referer;
   app.use(
     helmet({
-      //Need the referer origin to validate framer, omit for same origin calls
-      referrerPolicy: { policy: "strict-origin-when-cross-origin"} ,
       frameguard: false,
       contentSecurityPolicy: {
         directives: {
           ...helmet.contentSecurityPolicy.getDefaultDirectives(),
-          "frame-ancestors": [(req, res) => {
-            const referer = getReferer(req);
-            if (!referer) {
-              // Assume this is a same-origin call
-              // TODO: Fix same-origin navigations
-              return null;
-            } else if (framers.includes(referer)) {
-              return referer;
-            } else {
-              debug('Blocked framing for referer %s from non-IE browser', referer);
-              return null;
-            }
-          }]
-        },
+          "frame-ancestors": [framer]
+        }
       }
     }),
     (req, res, next) => {
       // Populate X-Frame for IE requests
-      const referer = getReferer(req);
       if (isIEReq(req)) {
-        if (!referer) {
-          // Assume this is a same-origin call
-          // TODO: Fix same-origin navigations
-          res.setHeader('X-Frame-Options', 'DENY')
-        }
-        if (framers.includes(referer)) {
-          res.setHeader('X-Frame-Options', 'ALLOW-FROM ' + referer)
-        } else {
-          // Omit X-Frame-Options intentionally
-          // There is no X-Frame directive that allows framing in modern browsers. Use CSP instead
-        }
+        res.setHeader('X-Frame-Options', 'ALLOW-FROM ' + framer)
       } else {
-        debug('Blocked framing for referer %s from non-IE browser', referer);
-        res.setHeader('X-Frame-Options', 'DENY')
+        // Omit X-Frame-Options intentionally
+        // There is no X-Frame directive that allows framing in modern browsers. Use CSP instead
       }
       next('route')
     })
