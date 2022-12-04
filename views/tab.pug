@@ -3,5 +3,9 @@ html
     title= title
   body
     h1= message
-    a(href="./"+tabId) Refresh tab 
+    ul 
+      li 
+        a(href="./"+tabId) Refresh tab 
+      li 
+        a(href="./"+tabId + "/logout") Close tab
     pre #{patient}

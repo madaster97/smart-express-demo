@@ -2,7 +2,7 @@ const helmet = require('helmet');
 const express = require('express')
 const { v4 } = require('uuid');
 const got = require('got').default;
-const { JWT: { decode: jwtDecode } } = require('jose');
+const jose = require('jose');
 const app = express()
 const { auth, requiresAuth } = require('express-openid-connect');
 const createHttpError = require('http-errors');
@@ -83,7 +83,7 @@ app.use(
     },
     transactionCookie: {
       // Explicitly setting pre-login cookie as well
-      // Lax is required for redirects to include anti-CSRF cookies
+      // Lax is required for redirects to include transaction cookie
       sameSite: allowFraming ? "None" : "Lax"
     },
     routes: {
@@ -107,8 +107,7 @@ app.use(
       if (!session.patient) {
         return Promise.reject('Patient missing from context. Does your auth server support launch/patient scope?');
       } else {
-        const { access_token, id_token, token_type, expires_at, refresh_token, ...tabData } = session;
-        const idTokenClaims = jwtDecode(session.id_token);
+        const idTokenClaims = jose.JWT.decode(session.id_token);
         const isSameUser =
           req.oidc.isAuthenticated()
           && req.oidc.user.sub == idTokenClaims.sub;
@@ -173,6 +172,17 @@ app.get('/launch', (req, res, next) => {
         launch: req.query.launch
       }
     })
+  }
+})
+
+app.get('/tab/:tabId/logout', requiresAuth(), async (req, res) => {
+  const requestedTab = req.params.tabId;
+  const tabData = req.appSession.tabs[requestedTab];
+  if (!tabData) {
+    next(createHttpError(403, 'Requested tab forbidden'))
+  } else {
+    delete req.appSession.tabs[requestedTab];
+    res.send('Logged out of this tab. Please close')
   }
 })
 
