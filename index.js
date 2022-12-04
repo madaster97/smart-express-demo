@@ -6,6 +6,7 @@ const jose = require('jose');
 const app = express()
 const { auth, requiresAuth } = require('express-openid-connect');
 const createHttpError = require('http-errors');
+const MemoryStore = require('memorystore')(auth);
 
 const debug = require('debug')('fhiruser');
 
@@ -74,7 +75,12 @@ app.use(
       response_type: 'code' // Required, otherwise SDK skips client_secret even on res.oidc.login
     },
     authRequired: false,
+    errorOnRequiredAuth: true,
     session: {
+      store: new MemoryStore({
+        // 5 minutes, just for this test app
+        checkPeriod: 1 * 60 * 1000,
+      }),
       cookie: {
         // Embedding in an iframe requires SameSite=None, counts as third party cookie
         // Otherwise set to Strict. Can be downgraded to Lax if preferred
@@ -107,6 +113,14 @@ app.use(
       if (!session.patient) {
         return Promise.reject('Patient missing from context. Does your auth server support launch/patient scope?');
       } else {
+        const { access_token, id_token, token_type, expires_at, refresh_token, ...context } = session;
+        const tabData = {
+          ...context,
+          access_token,
+          token_type,
+          expires_at,
+          refresh_token
+        }
         const idTokenClaims = jose.JWT.decode(session.id_token);
         const isSameUser =
           req.oidc.isAuthenticated()
@@ -141,11 +155,7 @@ app.use(
             [state.tabId]: tabData
           };
         return Promise.resolve({
-          access_token,
           id_token,
-          token_type,
-          expires_at,
-          refresh_token,
           tabs
         });
       }
@@ -193,10 +203,10 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res) => {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
     // Request patient data!
-    const tokenSet = req.oidc.accessToken;
+    const Authorization = tabData.token_type + ' ' + tabData.access_token;
     const patient = await got(fhirIss + '/Patient/' + tabData.patient, {
       headers: {
-        Authorization: tokenSet.token_type + ' ' + tokenSet.access_token
+        Authorization
       }
     }).json();
     // TODO, error handling around name parsing
