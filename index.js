@@ -220,6 +220,14 @@ app.get('/launch', (req, res, next) => {
   }
 })
 
+app.post('/tab/:tabId/csrf-test', (req, res, next) => {
+  if (!req.oidc.isAuthenticated()) {
+    res.send('CSRF successfuly blocked!')
+  } else {
+    res.send('Oh no. The CSRF went through...')
+  }
+})
+
 app.get('/tab/:tabId/logout', requiresAuth(), async (req, res, next) => {
   const requestedTab = req.params.tabId;
   const tabDataIndex = req.appSession.tabs.findIndex(tab => tab.tabId == requestedTab);
