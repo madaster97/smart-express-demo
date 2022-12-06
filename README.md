@@ -18,6 +18,14 @@ Open the [SMART App Launcher](https://launch.smarthealthit.org/?auth_error=&fhir
 
 The launcher is set to launch the app in an iframe, and the app is set to allow the launcher to frame it. Launch the app twice, choosing a different patient each time. Click refresh in each tab to verify they preserve the patient context.
 
+## Increasing Tab Count
+By default, this app allows one session to have 4 tabs open. You can override this with the `MAX_TAB_COUNT` env variable in your .env file:
+```
+...
+MAX_TAB_COUNT=6
+...
+```
+
 # Setup Other Auth Servers
 Copy `config/smart-launch.env`, to create a new `config/<config name>.env` file this instance of your app. This example only supports one auth server/FHIR server at a time.
 

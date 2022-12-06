@@ -19,6 +19,7 @@ if (!fhirIss) {
 }
 const launchUrl = process.env.BASE_URL + "/launch";
 const clientId = process.env.CLIENT_ID
+const maxTabCount = process.env.MAX_TAB_COUNT || 4;
 const framer = process.env.FRAMER_ORIGIN;
 const allowFraming = !!framer;
 if (!allowFraming) {
@@ -79,7 +80,7 @@ app.use(
     session: {
       store: new MemoryStore({
         // 5 minutes, just for this test app
-        checkPeriod: 1 * 60 * 1000,
+        checkPeriod: 5 * 60 * 1000,
       }),
       cookie: {
         // Embedding in an iframe requires SameSite=None, counts as third party cookie
@@ -119,45 +120,79 @@ app.use(
           access_token,
           token_type,
           expires_at,
+          // TODO: Remove refresh_token or use it below
           refresh_token
         }
         const idTokenClaims = jose.JWT.decode(session.id_token);
         const isSameUser =
           req.oidc.isAuthenticated()
           && req.oidc.user.sub == idTokenClaims.sub;
-        /* Example tabs object. Keys are tabIds
-        {
-          "5636ab83-167b-405e-af9f-1fbdbaf1aefc": {
-            "scope": "<omitted>",
-            "encounter": "eNe8sUNfKPazxTIA2rGmlbg3",
-            "need_patient_banner": "false",
-            "patient": "eTjDDWfopD0BnRlyEO2mGZQ3",
-            ...
+        /* Example tabs array:
+        [
+          {
+            tabId: "5636ab83-167b-405e-af9f-1fbdbaf1aefc"
+            data: {
+              "access_token": "<omitted>",
+              "scope": "<omitted>",
+              "encounter": "eNe8sUNfKPazxTIA2rGmlbg3",
+              "need_patient_banner": "false",
+              "patient": "eTjDDWfopD0BnRlyEO2mGZQ3",
+              ...
+            }
           },
-          "1daba7a1-0960-4e62-9014-1626a20f33dc": {
-            "scope": "<omitted>",
-            "encounter": "eajyq3tHTNbfPFZexvvMthA3",
-            "need_patient_banner": "false",
-            "patient": "eXFljJT8WxVd2PjwvPAGR1A3",
-            ...
+          {
+            tabId: "1daba7a1-0960-4e62-9014-1626a20f33dc",
+            data: {
+              "access_token": "<omitted>",
+              "scope": "<omitted>",
+              "encounter": "eajyq3tHTNbfPFZexvvMthA3",
+              "need_patient_banner": "false",
+              "patient": "eXFljJT8WxVd2PjwvPAGR1A3",
+              ...
+            }
           }
-        }
+        ]
         */
-        const tabs = isSameUser
-          // Same user logged in, combine tabs
-          ? {
-            [state.tabId]: tabData,
-            // REVIEW please. Grab old appSession to add to new session
-            ...req.appSession.tabs
+        const newTabObject = {
+          tabId: state.tabId,
+          data: tabData
+        }
+        if (!isSameUser) {
+          debug('Warning. New user logged in to existing session. Clearing existing session');
+          return Promise.resolve({
+            id_token,
+            tabs: [newTabObject]
+          })
+        } else {
+          const existingTabs = req.appSession.tabs;
+          const tabCount = existingTabs.length;
+          if (tabCount > maxTabCount) {
+            debug(`Server Error. Max tab count (${maxTabCount}) exceeded by sesion with ${tabCount} tabs. Clearing existing session`)
+            return Promise.resolve({
+              id_token,
+              tabs: [newTabObject]
+            })
+          } else if (tabCount == maxTabCount) {
+            // Remove first tab, without modifying existingTabs
+            const [_removing, ...filteredTabs] = existingTabs;
+            return Promise.resolve({
+              id_token,
+              tabs: [
+                ...filteredTabs,
+                newTabObject
+              ]
+            })
+          } else {
+            // Add new tab to the end of array
+            return Promise.resolve({
+              id_token,
+              tabs: [
+                ...existingTabs,
+                newTabObject
+              ]
+            })
           }
-          // New user logged in, create new tabs object
-          : {
-            [state.tabId]: tabData
-          };
-        return Promise.resolve({
-          id_token,
-          tabs
-        });
+        };
       }
     }
   })
@@ -185,24 +220,25 @@ app.get('/launch', (req, res, next) => {
   }
 })
 
-app.get('/tab/:tabId/logout', requiresAuth(), async (req, res) => {
+app.get('/tab/:tabId/logout', requiresAuth(), async (req, res, next) => {
   const requestedTab = req.params.tabId;
-  const tabData = req.appSession.tabs[requestedTab];
-  if (!tabData) {
+  const tabDataIndex = req.appSession.tabs.findIndex(tab => tab.tabId == requestedTab);
+  if (tabDataIndex == -1) {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
-    delete req.appSession.tabs[requestedTab];
+      req.appSession.tabs.splice(tabDataIndex, 1);
     res.send('Logged out of this tab. Please close')
   }
 })
 
-app.get('/tab/:tabId', requiresAuth(), async (req, res) => {
+app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
   const requestedTab = req.params.tabId;
-  const tabData = req.appSession.tabs[requestedTab];
-  if (!tabData) {
+  const tabDataIndex = req.appSession.tabs.findIndex(tab => tab.tabId == requestedTab);
+  if (tabDataIndex == -1) {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
     // Request patient data!
+    const tabData = req.appSession.tabs[tabDataIndex].data;
     const Authorization = tabData.token_type + ' ' + tabData.access_token;
     const patient = await got(fhirIss + '/Patient/' + tabData.patient, {
       headers: {
