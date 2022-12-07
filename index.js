@@ -7,6 +7,7 @@ const app = express()
 const { auth, requiresAuth } = require('express-openid-connect');
 const createHttpError = require('http-errors');
 const MemoryStore = require('memorystore')(auth);
+const crypto = require('crypto');
 
 const debug = require('debug')('fhiruser');
 
@@ -114,6 +115,7 @@ app.use(
       if (!session.patient) {
         return Promise.reject('Patient missing from context. Does your auth server support launch/patient scope?');
       } else {
+        const genToken = () => crypto.randomBytes(32).toString('hex');
         const { access_token, id_token, token_type, expires_at, refresh_token, ...context } = session;
         const tabData = {
           ...context,
@@ -158,18 +160,22 @@ app.use(
           data: tabData
         }
         if (!isSameUser) {
+          const csrfToken = genToken();
           debug('Warning. New user logged in to existing session. Clearing existing session');
           return Promise.resolve({
             id_token,
+            csrfToken,
             tabs: [newTabObject]
           })
         } else {
           const existingTabs = req.appSession.tabs;
+          const existingCsrfToken = req.appSession.csrfToken;
           const tabCount = existingTabs.length;
           if (tabCount > maxTabCount) {
-            debug(`Server Error. Max tab count (${maxTabCount}) exceeded by sesion with ${tabCount} tabs. Clearing existing session`)
+            debug(`Server Error. Max tab count (${maxTabCount}) exceeded by sesion with ${tabCount} tabs. Clearing existing tabs`)
             return Promise.resolve({
               id_token,
+              csrfToken: existingCsrfToken,
               tabs: [newTabObject]
             })
           } else if (tabCount == maxTabCount) {
@@ -177,6 +183,7 @@ app.use(
             const [_removing, ...filteredTabs] = existingTabs;
             return Promise.resolve({
               id_token,
+              csrfToken: existingCsrfToken,
               tabs: [
                 ...filteredTabs,
                 newTabObject
@@ -186,6 +193,7 @@ app.use(
             // Add new tab to the end of array
             return Promise.resolve({
               id_token,
+              csrfToken: existingCsrfToken,
               tabs: [
                 ...existingTabs,
                 newTabObject
@@ -220,11 +228,25 @@ app.get('/launch', (req, res, next) => {
   }
 })
 
-app.post('/tab/:tabId/csrf-test', (req, res, next) => {
-  if (!req.oidc.isAuthenticated()) {
-    res.send('CSRF successfuly blocked!')
+app.post('/tab/:tabId/patient-admit', requiresAuth(), express.urlencoded({ extended: false }), (req, res, next) => {
+  const inputToken = req.body['CSRFToken'];
+  const expectedToken = req.appSession.csrfToken;
+  const badRequest = (msg) => next(createHttpError(400, msg));
+  if (!inputToken) {
+    badRequest('Error, CSRF token missing');
+  } else if (Array.isArray(inputToken)) {
+    badRequest('Error, too many CSRF tokens');
+  } else if (inputToken != expectedToken) {
+    badRequest('Error, invalid CSRF token');
   } else {
-    res.send('Oh no. The CSRF went through...')
+    const requestedTab = req.params.tabId;
+    const tabDataIndex = req.appSession.tabs.findIndex(tab => tab.tabId == requestedTab);
+    if (tabDataIndex == -1) {
+      next(createHttpError(403, 'Requested tab forbidden'))
+    } else {
+      const tabData = req.appSession.tabs[tabDataIndex].data;
+      res.send('Succesfully admitted patient ' + tabData.patient +'. Hopefully you meant to do that!')
+    }
   }
 })
 
@@ -234,7 +256,7 @@ app.get('/tab/:tabId/logout', requiresAuth(), async (req, res, next) => {
   if (tabDataIndex == -1) {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
-      req.appSession.tabs.splice(tabDataIndex, 1);
+    req.appSession.tabs.splice(tabDataIndex, 1);
     res.send('Logged out of this tab. Please close')
   }
 })
@@ -260,7 +282,8 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
       title: "Seeing " + name,
       message: "Seeing Patient " + name,
       patient: JSON.stringify(patient, null, 2),
-      tabId: requestedTab
+      tabId: requestedTab,
+      csrfToken: req.appSession.csrfToken
     })
   }
 })
