@@ -1,9 +1,0 @@
-html
-  head
-    title= title
-  body
-    h1= message
-    ul
-        each data, tabId in locals.tabs
-            li 
-                a(href="/tab/"+tabId) Patient #{data.patient}

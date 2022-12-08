@@ -19,7 +19,6 @@ if (!fhirIss) {
   throw new Error('Missing FHIR_ISS environment variable')
 }
 const launchUrl = process.env.BASE_URL + "/launch";
-const clientId = process.env.CLIENT_ID
 const maxTabCount = process.env.MAX_TAB_COUNT || 4;
 const framer = process.env.FRAMER_ORIGIN;
 const allowFraming = !!framer;
@@ -85,7 +84,7 @@ app.use(
       }),
       cookie: {
         // Embedding in an iframe requires SameSite=None, counts as third party cookie
-        // Otherwise set to Strict. Can be downgraded to Lax if preferred
+        // Otherwise set to Lax. Can be upgraded to Strict if preferred
         sameSite: allowFraming ? "None" : "Strict"
       }
     },
@@ -228,7 +227,23 @@ app.get('/launch', (req, res, next) => {
   }
 })
 
-app.post('/tab/:tabId/patient-admit', requiresAuth(), express.urlencoded({ extended: false }), (req, res, next) => {
+const getPatient = async (tabData) => {
+  const tabData = req.appSession.tabs[tabDataIndex].data;
+    const Authorization = tabData.token_type + ' ' + tabData.access_token;
+    return got(fhirIss + '/Patient/' + tabData.patient, {
+      headers: {
+        Authorization
+      }
+    }).json();
+}
+
+const getPatientName = (patient) => {
+  // TODO, error handling around name parsing
+  const nameObject = patient.name[0];
+  return nameObject.family + ", " + nameObject.given[0];
+}
+
+app.post('/tab/:tabId/patient-admit', requiresAuth(), express.urlencoded({ extended: false }), async (req, res, next) => {
   const inputToken = req.body['CSRFToken'];
   const expectedToken = req.appSession.csrfToken;
   const badRequest = (msg) => next(createHttpError(400, msg));
@@ -245,19 +260,11 @@ app.post('/tab/:tabId/patient-admit', requiresAuth(), express.urlencoded({ exten
       next(createHttpError(403, 'Requested tab forbidden'))
     } else {
       const tabData = req.appSession.tabs[tabDataIndex].data;
-      res.send('Succesfully admitted patient ' + tabData.patient +'. Hopefully you meant to do that!')
+      req.appSession.tabs.splice(tabDataIndex, 1); //Logout of tab
+      const patient = await getPatient(tabData);
+      const name = getPatientName(patient);
+      res.send('Succesfully admitted patient ' + name +'. Hopefully you meant to do that! Close this tab');
     }
-  }
-})
-
-app.get('/tab/:tabId/logout', requiresAuth(), async (req, res, next) => {
-  const requestedTab = req.params.tabId;
-  const tabDataIndex = req.appSession.tabs.findIndex(tab => tab.tabId == requestedTab);
-  if (tabDataIndex == -1) {
-    next(createHttpError(403, 'Requested tab forbidden'))
-  } else {
-    req.appSession.tabs.splice(tabDataIndex, 1);
-    res.send('Logged out of this tab. Please close')
   }
 })
 
@@ -267,17 +274,8 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
   if (tabDataIndex == -1) {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
-    // Request patient data!
-    const tabData = req.appSession.tabs[tabDataIndex].data;
-    const Authorization = tabData.token_type + ' ' + tabData.access_token;
-    const patient = await got(fhirIss + '/Patient/' + tabData.patient, {
-      headers: {
-        Authorization
-      }
-    }).json();
-    // TODO, error handling around name parsing
-    const nameObject = patient.name[0];
-    const name = nameObject.family + ", " + nameObject.given[0];
+    const patient = await getPatient(tabData);
+    const name = getPatientName(patient);
     res.render('tab', {
       title: "Seeing " + name,
       message: "Seeing Patient " + name,
@@ -287,24 +285,6 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
     })
   }
 })
-
-app.get('/', (req, res) => {
-  if (!req.oidc.isAuthenticated()) {
-    res.render('login', {
-      title: "Log into fhiruser",
-      message: "Launch this app from the EHR to login",
-      fhirIss: fhirIss,
-      launchUrl: launchUrl,
-      clientId: clientId
-    })
-  } else {
-    res.render('index', {
-      title: "Welcome to fhiruser",
-      message: "Logged in with these tabs",
-      tabs: req.appSession.tabs
-    })
-  }
-});
 
 if (!isProd) {
   app.get('/debug', requiresAuth(), (req, res) => {
