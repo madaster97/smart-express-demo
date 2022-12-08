@@ -97,7 +97,7 @@ app.use(
       // Set to false to turn off standalone launch (/login endpoint)
       // I think there are risks to standalone + EHR on the same router
       // Especially risky when allowing third party cookies
-      login: false
+      // login: false
     },
     getLoginState: () => {
       // New UUID to represent this login
@@ -115,6 +115,8 @@ app.use(
         return Promise.reject('Patient missing from context. Does your auth server support launch/patient scope?');
       } else {
         const genToken = () => crypto.randomBytes(32).toString('hex');
+
+        // Setup this login's tabObject
         const { access_token, id_token, token_type, expires_at, refresh_token, ...context } = session;
         const tabData = {
           ...context,
@@ -123,83 +125,53 @@ app.use(
           expires_at,
           // TODO: Remove refresh_token or use it below
           refresh_token
-        }
-        const idTokenClaims = jose.JWT.decode(session.id_token);
-        const isSameUser =
-          req.oidc.isAuthenticated()
-          && req.oidc.user.sub == idTokenClaims.sub;
-        /* Example tabs array:
-        [
-          {
-            tabId: "5636ab83-167b-405e-af9f-1fbdbaf1aefc"
-            data: {
-              "access_token": "<omitted>",
-              "scope": "<omitted>",
-              "encounter": "eNe8sUNfKPazxTIA2rGmlbg3",
-              "need_patient_banner": "false",
-              "patient": "eTjDDWfopD0BnRlyEO2mGZQ3",
-              ...
-            }
-          },
-          {
-            tabId: "1daba7a1-0960-4e62-9014-1626a20f33dc",
-            data: {
-              "access_token": "<omitted>",
-              "scope": "<omitted>",
-              "encounter": "eajyq3tHTNbfPFZexvvMthA3",
-              "need_patient_banner": "false",
-              "patient": "eXFljJT8WxVd2PjwvPAGR1A3",
-              ...
-            }
-          }
-        ]
-        */
+        };
         const newTabObject = {
           tabId: state.tabId,
           data: tabData
-        }
-        if (!isSameUser) {
-          const csrfToken = genToken();
-          debug('Warning. New user logged in to existing session. Clearing existing session');
-          return Promise.resolve({
-            id_token,
-            csrfToken,
-            tabs: [newTabObject]
-          })
-        } else {
-          const existingTabs = req.appSession.tabs;
-          const existingCsrfToken = req.appSession.csrfToken;
-          const tabCount = existingTabs.length;
-          if (tabCount > maxTabCount) {
-            debug(`Server Error. Max tab count (${maxTabCount}) exceeded by sesion with ${tabCount} tabs. Clearing existing tabs`)
-            return Promise.resolve({
-              id_token,
-              csrfToken: existingCsrfToken,
-              tabs: [newTabObject]
-            })
-          } else if (tabCount == maxTabCount) {
-            // Remove first tab, without modifying existingTabs
-            const [_removing, ...filteredTabs] = existingTabs;
-            return Promise.resolve({
-              id_token,
-              csrfToken: existingCsrfToken,
-              tabs: [
-                ...filteredTabs,
-                newTabObject
-              ]
-            })
-          } else {
-            // Add new tab to the end of array
-            return Promise.resolve({
-              id_token,
-              csrfToken: existingCsrfToken,
-              tabs: [
-                ...existingTabs,
-                newTabObject
-              ]
-            })
-          }
         };
+
+        // Handle new auth, re-auth or replacement auth
+        const { sub: newSub } = jose.JWT.decode(session.id_token);
+        // const isSameUser =
+        //   req.oidc.isAuthenticated()
+        //   && req.oidc.user.sub == idTokenClaims.sub;
+        let csrfToken;
+        let tabs;
+        if (req.oidc.isAuthenticated()) {
+          if (req.oidc.user.sub === newSub) {
+            // If it's the same user logging in again
+            // return the existing CSRF token
+            csrfToken = session.csrfToken;
+            // Add new tab to tail of tabs list
+            const existingTabs = req.appSession.tabs;
+            const tabCount = existingTabs.length;
+            if (tabCount > maxTabCount) {
+              debug(`Server Error. Max tab count (${maxTabCount}) exceeded by sesion with ${tabCount} tabs. Clearing existing tabs`);
+              tabs = [newTabObject];
+            } else if (tabCount == maxTabCount) {
+              const [_removing, ...filteredTabs] = existingTabs;
+              tabs = [...filteredTabs, newTabObject];
+            } else { 
+              tabs = [...existingTabs, newTabObject];
+            }
+          } else {
+            // If it's a different user, replace the CSRF token
+            csrfToken = genToken();
+            tabs = [newTabObject];
+            debug(`Warning. A new user authenticated over another user's session`)
+          }
+        } else {
+          // If a new user is replacing an anonymous session, replace the CSRF token
+          csrfToken = genToken();
+          tabs = [newTabObject];
+        }
+
+        return Promise.resolve({
+          id_token,
+          csrfToken,
+          tabs
+        });
       }
     }
   })
@@ -228,13 +200,12 @@ app.get('/launch', (req, res, next) => {
 })
 
 const getPatient = async (tabData) => {
-  const tabData = req.appSession.tabs[tabDataIndex].data;
-    const Authorization = tabData.token_type + ' ' + tabData.access_token;
-    return got(fhirIss + '/Patient/' + tabData.patient, {
-      headers: {
-        Authorization
-      }
-    }).json();
+  const Authorization = tabData.token_type + ' ' + tabData.access_token;
+  return got(fhirIss + '/Patient/' + tabData.patient, {
+    headers: {
+      Authorization
+    }
+  }).json();
 }
 
 const getPatientName = (patient) => {
@@ -263,7 +234,7 @@ app.post('/tab/:tabId/patient-admit', requiresAuth(), express.urlencoded({ exten
       req.appSession.tabs.splice(tabDataIndex, 1); //Logout of tab
       const patient = await getPatient(tabData);
       const name = getPatientName(patient);
-      res.send('Succesfully admitted patient ' + name +'. Hopefully you meant to do that! Close this tab');
+      res.send('Succesfully admitted patient ' + name + '. Hopefully you meant to do that! Close this tab');
     }
   }
 })
@@ -274,6 +245,7 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
   if (tabDataIndex == -1) {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
+    const tabData = req.appSession.tabs[tabDataIndex].data;
     const patient = await getPatient(tabData);
     const name = getPatientName(patient);
     res.render('tab', {
