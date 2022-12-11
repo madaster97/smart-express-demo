@@ -1,0 +1,18 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <script src="./index.js"></script>
+    <title>cSRF Test</title>
+</head>
+<body onload="setupCSRF()">
+    <h1>SPA CSRF Test</h1>
+    <p id="token">Setting up CSRF Token...</p>
+
+    <button id="test-request" disabled="disabled" onclick="submitRequest()">
+        Submit Stateful Request
+    </button>
+</body>
+</html>
