@@ -1,42 +1,57 @@
 function setupCSRF() {
-    // This sets up a new CSRF token + sets a cookie
-    // Create an XMLHttpRequest object
-    const xhttp = new XMLHttpRequest();
-
-    xhttp.onreadystatechange = function (e) {
-        const token = document.getElementById('token');
-        if (xhttp.readyState == 4) {
-            if (xhttp.status == 200) {
-                const button = document.getElementById('test-request');
-                const csrf_token = xhttp.responseText;
-                function csrfSafeMethod(method) {
-                    // these HTTP methods do not require CSRF protection
-                    return (/^(GET|HEAD|OPTIONS)$/.test(method));
+    fetch('/get-csrf-token')
+        .then(response => {
+            if (response.status == 200) {
+                const token = document.getElementById('token');
+                const csrf_token = document.cookie
+                    .split('; ')
+                    .find((row) => row.startsWith('XSRF-TOKEN='))
+                    ?.split('=')[1];
+                if (!csrf_token) {
+                    token.innerText = 'Could not find token in "XSRF-TOKEN" cookie';
+                } else {
+                    token.innerText = 'Set token with value ' + csrf_token;
+                    const button = document.getElementById('test-request');
+                    button.removeAttribute('disabled');
                 }
-                var o = XMLHttpRequest.prototype.open;
-                XMLHttpRequest.prototype.open = function () {
-                    var res = o.apply(this, arguments);
-                    var err = new Error();
-                    if (!csrfSafeMethod(arguments[0])) {
-                        this.setRequestHeader('anti-csrf-token', csrf_token);
-                    }
-                    return res;
-                };
-                token.innerText = 'Loaded csrf-token: ' + csrf_token;
-                button.classList.remove('disabled');
             } else {
-                token.innerText = 'Failed to load csrf-token. Response code: ' + xhttp.status;
+                return response.json().then(errJson => {
+                    throw new Error(JSON.stringify(errJson, null, 2))
+                })
             }
-        }
-    };
-
-    // Send a request
-    xhttp.open('GET', '/get-csrf-token');
-    xhttp.send();
+        }).catch(err => {
+            const token = document.getElementById('token');
+            token.innerText = 'Error fetching token: ' + err.message;
+        });
 }
 
 function submitRequest() {
-    const xhttp = new XMLHttpRequest();
-    xhttp.open('POST', '/use-csrf-token');
-    xhttp.send();
+    const csrf_token = document.cookie
+        .split('; ')
+        .find((row) => row.startsWith('XSRF-TOKEN='))
+        ?.split('=')[1];
+    if (!csrf_token) {
+        const result = document.getElementById('result');
+        result.innerText = 'Error finding XSRF-TOKEN cookie';
+    } else {
+        fetch('/use-csrf-token', {
+            method: 'POST',
+            headers: {
+                'X-XSRF-TOKEN': csrf_token
+            }
+        })
+            .then(response => {
+                if (response.status == 200) {
+                    const result = document.getElementById('result');
+                    result.innerText = 'Successful request!';
+                } else {
+                    return response.json().then(errJson => {
+                        throw new Error(JSON.stringify(errJson, null, 2))
+                    })
+                }
+            }).catch(err => {
+                const result = document.getElementById('result');
+                result.innerText = 'Error sumbitting request: ' + err.message;
+            });
+    }
 }
