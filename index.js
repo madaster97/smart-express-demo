@@ -206,13 +206,15 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
   if (tabDataIndex == -1) {
     next(createHttpError(403, 'Requested tab forbidden'))
   } else {
+    const tabData = req.appSession.tabs[tabDataIndex].data;
     const patient = await getPatient(tabData);
     const name = getPatientName(patient);
     res.render('tab', {
       title: "Seeing " + name,
       message: "Seeing Patient " + name,
       patient: JSON.stringify(patient, null, 2),
-      tabId: requestedTab
+      tabId: requestedTab,
+      tabData: JSON.stringify(tabData, null, 2)
     })
   }
 })
