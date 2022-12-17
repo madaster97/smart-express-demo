@@ -3,8 +3,4 @@ html
     title= title
   body
     h1= message
-    li
-      form(action="./"+tabId+"/patient-admit", method="post") 
-        input(type="hidden", name="CSRFToken" value=csrfToken)
-        button(type="submit") Admit Patient (CSRF Test)
     pre #{patient}
