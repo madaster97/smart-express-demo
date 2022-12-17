@@ -95,9 +95,7 @@ app.use(
     },
     routes: {
       // Set to false to turn off standalone launch (/login endpoint)
-      // I think there are risks to standalone + EHR on the same router
-      // Especially risky when allowing third party cookies
-      // login: false
+      login: false
     },
     getLoginState: () => {
       // New UUID to represent this login
@@ -192,7 +190,7 @@ app.get('/launch', (req, res, next) => {
       authorizationParams: {
         response_type: 'code',
         aud: fhirIss,
-        scope: 'launch openid fhirUser launch/patient',
+        scope: 'launch openid fhirUser',
         launch: req.query.launch
       }
     })
@@ -211,7 +209,7 @@ const getPatient = async (tabData) => {
 const getPatientName = (patient) => {
   // TODO, error handling around name parsing
   const nameObject = patient.name[0];
-  return nameObject.family + ", " + nameObject.given[0];
+  return nameObject.family + ", " + nameObject.given.join(' ');
 }
 
 app.post('/tab/:tabId/patient-admit', requiresAuth(), express.urlencoded({ extended: false }), async (req, res, next) => {
