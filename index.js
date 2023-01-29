@@ -90,7 +90,7 @@ app.use(
     authorizationParams: {
       response_type: 'code' // Required, otherwise SDK skips client_secret even on res.oidc.login
     },
-    authRequired: false,
+    authRequired: true,
     errorOnRequiredAuth: true,
     session: {
       store: new MemoryStore({
@@ -216,7 +216,7 @@ const getPatientName = (patient) => {
   return nameObject.family + ", " + nameObject.given.join(' ');
 }
 
-app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
+app.get('/tab/:tabId', async (req, res, next) => {
   const requestedTab = req.params.tabId;
   const tabDataIndex = req.appSession.tabs.findIndex(tab => tab.tabId == requestedTab);
   if (tabDataIndex == -1) {
@@ -236,7 +236,7 @@ app.get('/tab/:tabId', requiresAuth(), async (req, res, next) => {
 })
 
 if (!isProd) {
-  app.get('/debug', requiresAuth(), (req, res) => {
+  app.get('/debug', (req, res) => {
     res.json({
       user: req.oidc.user,
       appSession: req.appSession
