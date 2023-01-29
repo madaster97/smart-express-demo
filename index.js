@@ -35,24 +35,40 @@ if (!allowFraming) {
   // Default, disallows framing
   app.use(helmet({}))
 } else {
+  // Require framing, and only from allowed origins
+  // Framing is required because of iframe security concessions, like SameSite=None cookies
+  // This library cannot selectively turn off those conecssions per request
   const isIEReq = (req) => req.headers['user-agent'].includes('Trident');
+  const isIFrameReq = (req) => req.headers['sec-fetch-dest'] === 'iframe';
   app.use(
+    (req, res, next) => {
+      if (isIFrameReq(req)) {
+        next('route')
+      } else {
+        next(createHttpError(403, "App must be iframed. 'sec-fetch-dest' indicated otherwise"))
+      }
+    },
     helmet({
       frameguard: false,
       contentSecurityPolicy: {
         directives: {
           ...helmet.contentSecurityPolicy.getDefaultDirectives(),
+          // If framers needs to be a list, put multiple here!
           "frame-ancestors": [framer]
         }
       }
     }),
     (req, res, next) => {
-      // Populate X-Frame for IE requests
+      // Populate X-Frame-Options for IE requests
       if (isIEReq(req)) {
+        // Does not accept multiple framers 
+        // If you need multiple framers, check "Referer" or "Origin" req headers
+        // If recognized, set that URL as the framer
+        // https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#identifying-source-origin-via-originreferer-header
         res.setHeader('X-Frame-Options', 'ALLOW-FROM ' + framer)
       } else {
         // Omit X-Frame-Options intentionally
-        // There is no X-Frame directive that allows framing in modern browsers. Use CSP instead
+        // There is no directive that allows framing in modern browsers. Omit and use CSP instead
       }
       next('route')
     })
