@@ -3,5 +3,6 @@ html
     title= title
   body
     h1= message
+    a(href="./" + tabId) Refresh (last at #{new Date().toLocaleTimeString('en-US')})
     pre #{tabData}
     pre #{patient}
