@@ -23,8 +23,8 @@ const framer = process.env.FRAMER_ORIGIN;
 const allowFraming = !!framer;
 if (!allowFraming) {
   debug(`FRAMER_ORIGIN environment variable is empty.
-    App will reject iframing by using Lax cookies, and by setting CSP or X-Frame-Options to block framing. 
-    Provide an allowed origin "https://first.ehr1.com/" to allow framing from that site`)
+App will reject iframing by using Lax cookies, and by setting CSP or X-Frame-Options to block framing. 
+Provide FRAMER_ORIGIN (example: https://*.ehr1.com/) to allow framing from that site`)
 } else {
   // TODO: Validate provided framers
   debug('iframing allowed from %s', framer);
@@ -83,9 +83,9 @@ app.use(
       }),
       cookie: {
         // Embedding in an iframe requires SameSite=None, counts as third party cookie
-        // Internal redirect from /callback to /tab/:tabId allows for Strict cookies
-        sameSite: allowFraming ? "None" : "Strict"
-      }
+        // Otherwise set to lax so /callback can see existing appSession tabs
+        sameSite: allowFraming ? "None" : "Lax"
+      },
     },
     transactionCookie: {
       // Explicitly setting pre-login cookie as well
